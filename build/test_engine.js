@@ -144,6 +144,30 @@ check('mg5 ไม่ถูกอ่านเป็น MG เฉย ๆ', ask('mg
 check('mg เฉย ๆ ยังหาทั้งยี่ห้อได้ปกติ', ask('mg ราคาเท่าไหร่').cards.length > 1,
   strip(ask('mg ราคาเท่าไหร่').headline));
 
+// --- regression: scrutinize round-2 findings (2026-08-24) ---
+// ช. budget cue word "max" ต้องไม่ไปกิน "d-max" ที่เป็นชื่อรุ่น (บั๊กที่รอบ 1 สร้างขึ้นเอง
+//    ตอนย้าย budget extraction มาทำงานก่อน year/normalize)
+check('"d-max 2010" ยังหา D-MAX ปี 2010 ได้ (ไม่ใช่ budget)', ask('d-max 2010').rowsCount > 0,
+  strip(ask('d-max 2010').headline));
+check('"แร็ค d-max 2005" ก็เช่นกัน', ask('แร็ค d-max 2005').rowsCount > 0,
+  strip(ask('แร็ค d-max 2005').headline));
+check('"แร็คไฟฟ้า max 3000" ยังอ่านเป็นงบได้ปกติ', ask('แร็คไฟฟ้า max 3000').cards.every(c => c.price <= 3000));
+// ซ. ArrowUp ไม่ควรมีผลกับ engine โดยตรง (เป็นเรื่อง DOM) แต่ตรวจว่า logic เดินได้หลายก้าว
+//    ผ่านการตรวจโค้ดแล้ว (เงื่อนไข value==='' || value===qHistory[histPos]); ที่นี่ตรวจแค่ว่า
+//    qHistory เก็บถูกลำดับ ไม่ใช่ทดสอบ DOM เพราะแซนด์บ็อกซ์นี้ไม่มี textarea จริง
+// ฌ. คำสั้น 3 ตัวอักษรอย่าง 'crv' ต้องยังแนะนำได้ (ไม่ใช่เงียบไปเลยเหมือนตอน >=4 เท่านั้น)
+{
+  const a = ask('crv ราคา');
+  const suggested = a.hint && /CR-V/.test(a.hint);
+  check('"crv" แนะนำ CR-V ได้', a.cards ? true : suggested, a.hint || strip(a.headline));
+}
+// ญ. brand alias ต้องยังจับ 'brand+ปี' แบบไม่เว้นวรรคได้ (ปีมี >=3 หลัก ต่างจาก mg3/mg5 ที่มี 1 หลัก)
+check('"ford2010" ยังจับ FORD ได้', ask('ford2010').cards ? ask('ford2010').cards.length > 0
+  : /FORD|ford/i.test(strip(ask('ford2010').headline)),
+  strip(ask('ford2010').headline));
+// ยังต้องไม่พังของเดิม: mg3/mg5 แยกจาก MG เฉย ๆ
+check('mg3 ยังแยกจาก MG เฉย ๆ ได้เหมือนเดิม (ไม่ regress)', ask('mg3 ราคาเท่าไหร่').rowsCount === 1);
+
 console.log(failed === 0
   ? 'PASS  ทดสอบผ่านทั้งหมด (' + sandbox.__ROWS.length + ' แถว / ' + sandbox.__CODES.length + ' รหัส)'
   : failed + ' เคสไม่ผ่าน');

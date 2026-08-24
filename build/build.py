@@ -55,10 +55,18 @@ def load_rows():
                 'แถวที่ %d: ประเภทแร็ค "%s" ไม่ถูกต้อง ใช้ได้แค่ %s' % (i, rtype, TYPES))
         if not re.fullmatch(r"\d{4}-\d{4}", str(year or "")):
             raise SystemExit('แถวที่ %d: ปี "%s" ต้องอยู่ในรูป YYYY-YYYY' % (i, year))
+        price_str = str(price).replace(",", "").strip()
         try:
-            price_int = int(str(price).replace(",", "").strip())
+            price_int = int(price_str)
         except (TypeError, ValueError):
-            raise SystemExit('แถวที่ %d: ราคา "%s" ไม่ใช่ตัวเลข (รหัสแร็ค %r)' % (i, price, code))
+            try:
+                float(price_str)
+            except (TypeError, ValueError):
+                raise SystemExit(
+                    'แถวที่ %d: ราคา "%s" ไม่ใช่ตัวเลข (รหัสแร็ค %r)' % (i, price, code))
+            raise SystemExit(
+                'แถวที่ %d: ราคา "%s" มีจุดทศนิยม ระบบรับเฉพาะราคาเต็มบาท (รหัสแร็ค %r)'
+                % (i, price, code))
         if brand not in brands:
             brands.append(brand)
         lhd = 1 if LHD_MARK in str(model) else 0

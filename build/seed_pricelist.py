@@ -13,6 +13,7 @@
 import csv
 import os
 import random
+import sys
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -353,6 +354,14 @@ if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
     xlsx_path = os.path.join(OUT_DIR, BASE + ".xlsx")
     csv_path = os.path.join(OUT_DIR, BASE + ".csv")
+
+    # data/*.xlsx คือไฟล์ที่ build.py อ่านจริง ถ้ามีคนแก้ราคาจริงไว้แล้วรันสคริปต์นี้ซ้ำ
+    # จะเขียนทับข้อมูลสมมติกลับไปทันทีโดยไม่มีการเตือน จึงต้องกัน --force ไว้
+    if os.path.exists(xlsx_path) and "--force" not in sys.argv:
+        raise SystemExit(
+            "%s มีอยู่แล้ว สคริปต์นี้ทำไว้ seed ข้อมูลตัวอย่างครั้งแรกเท่านั้น\n"
+            "ถ้าตั้งใจจะเขียนทับ (ราคาจริงที่แก้ไว้จะหาย) ให้รันใหม่พร้อม --force" % xlsx_path)
+
     write_xlsx(rows, xlsx_path)
     write_csv(rows, csv_path)
 

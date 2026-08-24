@@ -385,15 +385,38 @@ function norm(s){
 }
 function thb(n){return n.toLocaleString('en-US')}
 // alias ภาษาอังกฤษ (เช่น 'mg') ต้องชนขอบคำ ไม่งั้นจะไปกิน 'mg3'/'mg5' ที่เป็นเลขรุ่นจริง
+// แต่ถ้าตามด้วยเลข 3 หลักขึ้นไป (เช่น 'ford2010') ให้ถือว่าเป็นปีติดกันแบบไม่เว้นวรรค ไม่ใช่
+// เลขรุ่น (เลขรุ่นในตารางนี้ต่อท้ายยี่ห้อด้วยเลข 1 หลักเท่านั้น เช่น mg3, mg5) จึงยอมให้ผ่าน
 // alias ภาษาไทยไม่ต้องเช็คขอบคำ เพราะไทยไม่เว้นวรรคอยู่แล้วและชื่อรุ่นมักไม่ใช่ prefix ของกันเอง
 function aliasRe(alias){
   const esc = alias.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   return /^[a-z]/i.test(alias)
-    ? new RegExp('(^|[^a-z0-9])(' + esc + ')($|[^a-z0-9])', 'gi')
+    ? new RegExp('(^|[^a-z0-9])(' + esc + ')($|[^a-z0-9]|(?=\\d{3,}))', 'gi')
     : new RegExp('()(' + esc + ')()', 'g');
 }
 function aliasHit(q, alias){ return aliasRe(alias).test(q); }
 function aliasStrip(q, alias){ return q.replace(aliasRe(alias), '$1 $3'); }
+
+// หาคำเรียกงบ/ไม่เกิน + ตัวเลข ในข้อความดิบ (ก่อน normalize) ไม่ใช้ regex lookbehind
+// (บาง engine เก่าไม่รองรับ) ใช้ตรวจ "ตัวอักษรก่อนหน้า" ด้วยมือแทน คำอังกฤษ (under/max)
+// ต้องชนขอบคำ ไม่งั้น "max" จะไปแมตช์ในคำว่า "d-max" ซึ่งเป็นชื่อรุ่นรถ ส่วนคำไทยไม่ต้อง
+// เช็คขอบคำเพราะไม่มีชื่อรุ่นภาษาไทยที่จะชนกัน
+function findBudget(raw){
+  const cues = ['ไม่เกิน','ต่ำกว่า','ภายใน','งบ','under','max'];
+  let best = null;
+  cues.forEach(function(cue){
+    const latin = /^[a-z]/i.test(cue);
+    const re = new RegExp(cue.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '\\s*([\\d][\\d,]{1,7})', 'gi');
+    let m;
+    while((m = re.exec(raw))){
+      const before = raw[m.index - 1];
+      if(!(latin && before && /[a-z0-9-]/i.test(before))){
+        if(best === null || m.index < best.index) best = {index:m.index, len:m[0].length, value:m[1]};
+      }
+    }
+  });
+  return best;
+}
 
 /* ---------------- query parsing ---------------- */
 function parse(qRaw){
@@ -402,10 +425,10 @@ function parse(qRaw){
   // regex ปี (19xx/20xx) ตีความเป็นปีรถไปก่อน
   let raw = String(qRaw);
   let cap = null;
-  const capm = raw.match(/(?:ไม่เกิน|ต่ำกว่า|ภายใน|งบ|under|max)\s*([\d][\d,]{1,7})/i);
-  if(capm){
-    cap = parseInt(capm[1].replace(/,/g,''),10);
-    raw = raw.slice(0, capm.index) + ' ' + raw.slice(capm.index + capm[0].length);
+  const capHit = findBudget(raw);
+  if(capHit){
+    cap = parseInt(capHit.value.replace(/,/g,''),10);
+    raw = raw.slice(0, capHit.index) + ' ' + raw.slice(capHit.index + capHit.len);
   }
   let q = norm(raw);
   const p = {raw:qRaw, brands:[], terms:[], unknown:[], code:null, year:null, type:null,
@@ -606,12 +629,18 @@ function answer(qRaw){
 
 function noResult(p){
   const guess = [];
-  // ต้อง >=4 ตัวอักษรถึงเดา เพราะ near() ทนพิมพ์ผิดได้ 1 ตัว ถ้า needle สั้นกว่านี้
-  // แทบทุกแถวจะ "ใกล้เคียง" ไปหมดจนคำแนะนำไม่มีความหมาย
-  if(p.terms.length && p.terms[0].length >= 4){
+  if(p.terms.length){
     const t = p.terms[0];
     const hit = {};
-    ROWS.forEach(function(r){ if(near(r.hay, t.slice(0, Math.max(4, t.length-1)))) hit[r.model] = 1; });
+    if(t.length >= 4){
+      // >=4 ตัวอักษร: ทนพิมพ์ผิดได้ 1 ตัว (near) เพราะ needle ยาวพอ ไม่ทำให้ match มั่วทั้งตาราง
+      ROWS.forEach(function(r){ if(near(r.hay, t.slice(0, Math.max(4, t.length-1)))) hit[r.model] = 1; });
+    } else if(t.length === 3){
+      // 3 ตัวอักษร (เช่น 'crv' ที่คนพิมพ์แทน CR-V บ่อย): ไม่ทนพิมพ์ผิด ต้อง match ตรงเป๊ะ
+      // เป็น substring เท่านั้น กันคำแนะนำมั่วแบบที่ near() ทนพิมพ์ผิดเคยทำ
+      const needle = t.replace(/-/g,'');
+      ROWS.forEach(function(r){ if(r.hay.replace(/-/g,'').indexOf(needle) >= 0) hit[r.model] = 1; });
+    }
     Object.keys(hit).slice(0,6).forEach(function(m){guess.push(m)});
   }
   let hint = 'ลองพิมพ์เฉพาะชื่อรุ่นสั้น ๆ เช่น <b>vigo</b>, <b>altis</b>, <b>d-max</b> หรือใส่รหัสแร็คอย่าง <b>RT01</b>';
@@ -819,14 +848,18 @@ input.addEventListener('keydown', function(e){
   if(e.key === 'Enter' && !e.shiftKey){
     e.preventDefault();
     submitInput();
-  } else if(e.key === 'ArrowUp' && qHistory.length && input.value.indexOf('\n') < 0){
-    // เช็คแค่ไม่มีขึ้นบรรทัดใหม่ (ไม่ใช่ value === '' เหมือนเดิม) เพื่อให้กด ArrowUp
-    // ย้อนประวัติได้ต่อเนื่องหลายครั้ง แม้กล่องพิมพ์จะมีข้อความจากการย้อนรอบก่อนอยู่แล้ว
-    // ส่วนกรณีพิมพ์หลายบรรทัดด้วย shift+enter ปล่อยให้ ArrowUp เลื่อน cursor ตามปกติ
+  } else if(e.key === 'ArrowUp' && qHistory.length &&
+            (input.value === '' || input.value === qHistory[histPos])){
+    // ดักเฉพาะตอนกล่องว่าง หรือเป็นข้อความที่เพิ่งย้อนมาแบบไม่ถูกแก้ไข (เท่ากับ qHistory[histPos]
+    // เป๊ะ) เพื่อให้กด ArrowUp ต่อเนื่องเดินย้อนได้หลายครั้ง (บั๊กเดิมเช็ค value==='' อย่างเดียว
+    // เลยเดินได้แค่ก้าวเดียว) แต่ถ้าผู้ใช้กำลังพิมพ์ร่างคำถามของตัวเองอยู่ (value ไม่ตรงกับ
+    // ประวัติข้อไหนเลย) ต้องไม่แย่ง ArrowUp ไปจากพฤติกรรมเลื่อน cursor ปกติของ textarea
+    // ไม่งั้นร่างที่พิมพ์ค้างไว้จะหายไปเฉย ๆ
     e.preventDefault();
     histPos = Math.min(histPos+1, qHistory.length-1);
     input.value = qHistory[histPos]; autosize();
-  } else if(e.key === 'ArrowDown' && histPos > -1 && input.value.indexOf('\n') < 0){
+  } else if(e.key === 'ArrowDown' && histPos > -1 &&
+            (input.value === '' || input.value === qHistory[histPos])){
     e.preventDefault();
     histPos--; input.value = histPos < 0 ? '' : qHistory[histPos]; autosize();
   }
