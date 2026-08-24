@@ -109,6 +109,41 @@ for (const r of sandbox.__ROWS) {
   check('รหัส ' + r.code + ' ประเภทเดียว', f.typeIdx === r.typeIdx);
 }
 
+// --- regression: scrutinize round-1 findings (2026-08-24) ---
+// ก. ถูกสุด/แพงสุดพิมพ์มาด้วยกัน ต้อง label กับลำดับ sort ตรงกัน (ไม่ใช่ label บอกถูกแต่โชว์แพง)
+{
+  const a = ask('TOYOTA ที่ถูกที่สุด และแพงที่สุด');
+  const asc = a.cards.every((c, i) => i === 0 || c.price >= a.cards[i - 1].price);
+  const desc = a.cards.every((c, i) => i === 0 || c.price <= a.cards[i - 1].price);
+  const labelCheap = /ถูกที่สุด/.test(strip(a.headline));
+  check('cheap/exp label ตรงกับลำดับ sort', (labelCheap && asc) || (!labelCheap && desc),
+    strip(a.headline) + ' | prices: ' + a.cards.map(c => c.price).join(','));
+}
+// ข. ตัวเลขงบต้องไม่ถูก regex ปีกินไปก่อน (เช่น 2000-2029 ทับช่วงปีรถ)
+check('งบ 2500 ไม่ถูกตีความเป็นปี', ask('แร็คไฟฟ้างบ 2500').cards.every(c => c.price <= 2500),
+  strip(ask('แร็คไฟฟ้างบ 2500').headline));
+// ค. งบที่มี comma คั่นหลักพันต้องอ่านค่าได้ถูก ไม่ใช่หลุดไปเป็นคำค้นแยก "000"
+check('ไม่เกิน 3,000 อ่าน comma ได้', ask('แร็คไฟฟ้าไม่เกิน 3,000').cards.every(c => c.price <= 3000),
+  strip(ask('แร็คไฟฟ้าไม่เกิน 3,000').headline));
+// ง. คำแนะนำ "ใกล้เคียง" ต้องไม่มั่วเมื่อพิมพ์คำสั้น (near() ทน 1 ตัวอักษร ทำให้คำ 3 ตัวแทบ match ทุกแถว)
+{
+  const a = ask('แร็คไฟฟ้าไม่เกิน 500'); // ต่ำกว่าราคาต่ำสุดในตาราง ไม่มีผลลัพธ์แน่นอน
+  check('ไม่มีคำแนะนำมั่วเมื่อไม่มีคำค้นยาวพอ', !a.hint || !/ใกล้เคียง/.test(a.hint), a.hint);
+}
+// จ. พิมพ์คำถามระหว่าง busy (จำลองด้วยการเรียก ask ซ้อนตรง ๆ ไม่ได้ เพราะ setTimeout ถูก stub
+//    ให้ no-op ในแซนด์บ็อกซ์นี้แล้ว — ตรวจแค่ว่า submitInput ไม่มีให้เรียกซ้อนได้จาก node สายตรง
+//    ส่วนพฤติกรรมจริงยืนยันด้วยการอ่านโค้ด: ask() คืนทันทีเมื่อ busy โดยไม่แตะ input.value อีกต่อไป)
+check('answer() ไม่ throw เมื่อเรียกซ้อนกันเร็ว ๆ', (() => {
+  try { ask('vigo'); ask('altis'); return true; } catch (e) { return false; }
+})());
+// ฉ. brand alias ภาษาอังกฤษต้องชนขอบคำ ไม่กิน 'mg3'/'mg5' ที่เป็นเลขรุ่น
+check('mg3 ไม่ถูกอ่านเป็น MG เฉย ๆ', ask('mg3 ราคาเท่าไหร่').rowsCount === 1,
+  strip(ask('mg3 ราคาเท่าไหร่').headline));
+check('mg5 ไม่ถูกอ่านเป็น MG เฉย ๆ', ask('mg5 ราคาเท่าไหร่').rowsCount === 1,
+  strip(ask('mg5 ราคาเท่าไหร่').headline));
+check('mg เฉย ๆ ยังหาทั้งยี่ห้อได้ปกติ', ask('mg ราคาเท่าไหร่').cards.length > 1,
+  strip(ask('mg ราคาเท่าไหร่').headline));
+
 console.log(failed === 0
   ? 'PASS  ทดสอบผ่านทั้งหมด (' + sandbox.__ROWS.length + ' แถว / ' + sandbox.__CODES.length + ' รหัส)'
   : failed + ' เคสไม่ผ่าน');

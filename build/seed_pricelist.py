@@ -3,13 +3,16 @@
 สร้างไฟล์ Excel ตารางราคาแร็คพวงมาลัย 200 รายการ (ข้อมูลสมมติ สำหรับทดลองทำแชทบอท)
 เลียนแบบรูปแบบตารางของ บริษัท อาร์เอ็มเอ ซิตี้ มอเตอร์ส จำกัด
 
-ออกไฟล์:
-  C:\\Users\\User\\Downloads\\ตารางราคาแร็คพวงมาลัย-200รายการ.xlsx
-  C:\\Users\\User\\Downloads\\ตารางราคาแร็คพวงมาลัย-200รายการ.csv   (UTF-8 BOM สำหรับป้อนบอท)
+รัน:  python build/seed_pricelist.py     (จาก root ของ repo — ใช้ครั้งแรกครั้งเดียว
+                                          ถ้าจะแก้ข้อมูลจริงให้แก้ที่ data/*.xlsx โดยตรงแทน)
+
+ออกไฟล์ (path สัมพัทธ์กับ repo ไม่ผูกกับเครื่องใดเครื่องหนึ่ง):
+  data/rack-price-list-200.xlsx   ไฟล์ที่ build.py อ่านจริง
+  data/rack-price-list-200.csv    UTF-8 BOM สำหรับป้อนบอทตัวอื่นหรือดูด้วย Excel
 """
 import csv
-import random
 import os
+import random
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -17,8 +20,9 @@ from openpyxl.utils import get_column_letter
 
 random.seed(20260824)
 
-OUT_DIR = r"C:\Users\User\Downloads"
-BASE = "ตารางราคาแร็คพวงมาลัย-200รายการ"
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(os.path.dirname(HERE), "data")
+BASE = "rack-price-list-200"
 
 HYD = "น้ำมัน"
 EPS = "ไฟฟ้ากระบอกแห้ง"
@@ -331,12 +335,10 @@ def write_csv(rows, path):
 
 if __name__ == "__main__":
     rows = build_rows()
-    xlsx_path = os.path.join(OUT_DIR, BASE + ".xlsx")
-    csv_path = os.path.join(OUT_DIR, BASE + ".csv")
-    write_xlsx(rows, xlsx_path)
-    write_csv(rows, csv_path)
 
-    # ---- ตรวจความสมเหตุสมผลของข้อมูลก่อนบันทึก ----
+    # ---- ตรวจความสมเหตุสมผลของข้อมูล "ก่อน" เขียนไฟล์ลงดิสก์เสมอ ----
+    # เดิมบล็อกนี้อยู่ "หลัง" write_xlsx/write_csv แปลว่าถ้าข้อมูลพัง ไฟล์ที่คละราคา/
+    # ประเภทต่อรหัสก็เขียนลงดิสก์ไปแล้วก่อน assert จะทำงาน (build.py อาจหยิบไฟล์เสียไปใช้)
     type_of_code, price_of_code, seen = {}, {}, set()
     for r in rows:
         key = (r["brand"], r["code"])
@@ -348,6 +350,12 @@ if __name__ == "__main__":
         assert mk not in seen, "รุ่นซ้ำ: %s" % (mk,)
         seen.add(mk)
 
+    os.makedirs(OUT_DIR, exist_ok=True)
+    xlsx_path = os.path.join(OUT_DIR, BASE + ".xlsx")
+    csv_path = os.path.join(OUT_DIR, BASE + ".csv")
+    write_xlsx(rows, xlsx_path)
+    write_csv(rows, csv_path)
+
     brands = {}
     for r in rows:
         brands[r["brand"]] = brands.get(r["brand"], 0) + 1
@@ -356,3 +364,4 @@ if __name__ == "__main__":
     print("codes:", len(set((r["brand"], r["code"]) for r in rows)))
     print("saved:", xlsx_path)
     print("saved:", csv_path)
+    print("ถัดไป: python build/build.py  เพื่อประกอบ index.html ใหม่")

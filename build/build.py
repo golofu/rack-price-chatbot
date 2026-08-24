@@ -37,21 +37,38 @@ def load_rows():
             % (HEADERS, header))
 
     brands, out = [], []
+    skipped = []
     for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         no, code, brand, model, year, engine, rtype, price = row[:8]
         if code is None:
+            # แถวว่างจริง (ไม่มีข้อมูลอะไรเลย) ข้ามแบบเงียบได้ แต่ถ้ามีข้อมูลอื่นอยู่
+            # แสดงว่าพิมพ์ตกช่องรหัสแร็ค ต้องเตือน ไม่งั้นรถหายไปจากเว็บโดยไม่มีใครรู้
+            if any(v is not None for v in (brand, model, year, engine, rtype, price)):
+                skipped.append(i)
             continue
+        if not brand:
+            raise SystemExit('แถวที่ %d: ไม่มี BRAND (รหัสแร็ค %r)' % (i, code))
+        if not model:
+            raise SystemExit('แถวที่ %d: ไม่มี MODEL (รหัสแร็ค %r)' % (i, code))
         if rtype not in TYPES:
             raise SystemExit(
                 'แถวที่ %d: ประเภทแร็ค "%s" ไม่ถูกต้อง ใช้ได้แค่ %s' % (i, rtype, TYPES))
         if not re.fullmatch(r"\d{4}-\d{4}", str(year or "")):
             raise SystemExit('แถวที่ %d: ปี "%s" ต้องอยู่ในรูป YYYY-YYYY' % (i, year))
+        try:
+            price_int = int(str(price).replace(",", "").strip())
+        except (TypeError, ValueError):
+            raise SystemExit('แถวที่ %d: ราคา "%s" ไม่ใช่ตัวเลข (รหัสแร็ค %r)' % (i, price, code))
         if brand not in brands:
             brands.append(brand)
-        lhd = 1 if LHD_MARK in model else 0
-        clean = re.sub(r"\s*\*พวงมาลัยซ้าย\*", "", model).strip()
+        lhd = 1 if LHD_MARK in str(model) else 0
+        clean = re.sub(r"\s*\*พวงมาลัยซ้าย\*", "", str(model)).strip()
         out.append([code, brands.index(brand), clean, str(year), engine,
-                    TYPES.index(rtype), int(price), lhd])
+                    TYPES.index(rtype), price_int, lhd])
+    if skipped:
+        raise SystemExit(
+            "แถวที่ %s: มีข้อมูลอยู่แต่ช่องรหัสแร็คว่างเปล่า — ตรวจว่าพิมพ์ตกหรือลบผิดช่อง"
+            % ", ".join(str(n) for n in skipped))
     if not out:
         raise SystemExit("ไม่พบข้อมูลในไฟล์ xlsx")
 

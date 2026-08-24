@@ -36,7 +36,7 @@
   --accent:#4FC5CE; --accent-deep:#8AE0E7; --accent-soft:#0F3A3F; --accent-ring:#4FC5CE44;
   --oil:#E3A268; --oil-soft:#33240F; --oil-line:#4B3618;
   --eps:#B3A6F0; --eps-soft:#231D45; --eps-line:#352C63;
-  --user-bg:#17636B; --user-ink:#EAFDFF;
+  --user-bg:#17636B; --user-ink:#EAFDFF; --on-accent:#06262A;
   --shadow-1:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -16px rgba(0,0,0,.7);
   --shadow-2:0 2px 4px rgba(0,0,0,.45), 0 18px 40px -22px rgba(0,0,0,.8);
 }
@@ -384,12 +384,32 @@ function norm(s){
     .replace(/\s+/g,' ').trim();
 }
 function thb(n){return n.toLocaleString('en-US')}
+// alias ภาษาอังกฤษ (เช่น 'mg') ต้องชนขอบคำ ไม่งั้นจะไปกิน 'mg3'/'mg5' ที่เป็นเลขรุ่นจริง
+// alias ภาษาไทยไม่ต้องเช็คขอบคำ เพราะไทยไม่เว้นวรรคอยู่แล้วและชื่อรุ่นมักไม่ใช่ prefix ของกันเอง
+function aliasRe(alias){
+  const esc = alias.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return /^[a-z]/i.test(alias)
+    ? new RegExp('(^|[^a-z0-9])(' + esc + ')($|[^a-z0-9])', 'gi')
+    : new RegExp('()(' + esc + ')()', 'g');
+}
+function aliasHit(q, alias){ return aliasRe(alias).test(q); }
+function aliasStrip(q, alias){ return q.replace(aliasRe(alias), '$1 $3'); }
 
 /* ---------------- query parsing ---------------- */
 function parse(qRaw){
-  let q = norm(qRaw);
+  // งบ/ไม่เกิน ต้องแยกจาก raw ก่อน normalize เพราะ norm() ตัด comma ทิ้ง ("3,000" จะกลาย
+  // เป็น "3 000" แล้วจับไม่ติด) และต้องแยกก่อนเช็คปี ไม่งั้นตัวเลขงบ (เช่น 2500) จะถูก
+  // regex ปี (19xx/20xx) ตีความเป็นปีรถไปก่อน
+  let raw = String(qRaw);
+  let cap = null;
+  const capm = raw.match(/(?:ไม่เกิน|ต่ำกว่า|ภายใน|งบ|under|max)\s*([\d][\d,]{1,7})/i);
+  if(capm){
+    cap = parseInt(capm[1].replace(/,/g,''),10);
+    raw = raw.slice(0, capm.index) + ' ' + raw.slice(capm.index + capm[0].length);
+  }
+  let q = norm(raw);
   const p = {raw:qRaw, brands:[], terms:[], unknown:[], code:null, year:null, type:null,
-             lhd:false, cheap:false, exp:false, cap:null, count:false, listAll:false, engine:null};
+             lhd:false, cheap:false, exp:false, cap:cap, count:false, listAll:false, engine:null};
 
   // รหัสแร็ค เช่น RT01 RTL20 rh 5
   const cm = q.match(/\b(rt|rh|rn|ri|rm|rz|rf|rc|rs|rg)\s?(l)?\s?0?(\d{1,2})\b/i);
@@ -403,12 +423,14 @@ function parse(qRaw){
   const ym = q.match(/\b(19[89]\d|20[0-2]\d)\b/);
   if(ym){ p.year = parseInt(ym[1],10); q = q.replace(ym[0],' '); }
 
-  // งบ / ไม่เกิน
-  const capm = q.match(/(?:ไม่เกิน|ต่ำกว่า|ภายใน|งบ|under|max)\s*([\d,]{3,6})/);
-  if(capm){ p.cap = parseInt(capm[1].replace(/,/g,''),10); q = q.replace(capm[0],' '); }
+  // ถูกสุด/แพงสุด เป็นเจตนาที่ขัดกันเอง ถ้าคำถามมีทั้งคู่ให้ยึดคำที่พิมพ์ทีหลังเป็นตัวจริง
+  // (กันกรณี label กับลำดับ sort ไม่ตรงกัน)
+  const cheapM = q.match(/ถูกสุด|ถูกที่สุด|ต่ำสุด|ราคาต่ำ|cheap/);
+  const expM = q.match(/แพงสุด|แพงที่สุด|สูงสุด|ราคาสูง|expensive/);
+  if(cheapM && expM){ if(cheapM.index >= expM.index) p.cheap = true; else p.exp = true; }
+  else if(cheapM){ p.cheap = true; }
+  else if(expM){ p.exp = true; }
 
-  if(/ถูกสุด|ถูกที่สุด|ต่ำสุด|ราคาต่ำ|cheap/.test(q)) p.cheap = true;
-  if(/แพงสุด|แพงที่สุด|สูงสุด|ราคาสูง|expensive/.test(q)) p.exp = true;
   if(/กี่รายการ|กี่ตัว|กี่รุ่น|กี่รหัส|จำนวน|how many/.test(q)) p.count = true;
   if(/ทั้งหมด|มีอะไรบ้าง|มีรุ่นไหน|ลิสต์|list|all/.test(q)) p.listAll = true;
   if(/ไฟฟ้า|กระบอกแห้ง|eps|electric/.test(q)) p.type = 1;
@@ -418,7 +440,7 @@ function parse(qRaw){
   // ยี่ห้อ
   Object.keys(BRAND_ALIAS).forEach(function(b){
     BRAND_ALIAS[b].slice().sort(function(x,y){return y.length-x.length}).forEach(function(a){
-      if(p.brands.indexOf(b) < 0 && q.indexOf(a) >= 0){ p.brands.push(b); q = q.split(a).join(' '); }
+      if(p.brands.indexOf(b) < 0 && aliasHit(q, a)){ p.brands.push(b); q = aliasStrip(q, a); }
     });
   });
 
@@ -484,8 +506,9 @@ function search(p){
     use.sort(function(a,b){return b.s - a.s});
     rows = use.map(function(x){return x.r});
   }
+  // cheap/exp กันไว้ให้ mutually exclusive แล้วตั้งแต่ parse() แต่กันซ้ำอีกชั้นเผื่อเรียก search() ตรง ๆ
   if(p.cheap) rows.sort(function(a,b){return a.price - b.price});
-  if(p.exp) rows.sort(function(a,b){return b.price - a.price});
+  else if(p.exp) rows.sort(function(a,b){return b.price - a.price});
   return rows;
 }
 // เผื่อพิมพ์ผิด 1 ตัวอักษร
@@ -583,10 +606,12 @@ function answer(qRaw){
 
 function noResult(p){
   const guess = [];
-  if(p.terms.length){
+  // ต้อง >=4 ตัวอักษรถึงเดา เพราะ near() ทนพิมพ์ผิดได้ 1 ตัว ถ้า needle สั้นกว่านี้
+  // แทบทุกแถวจะ "ใกล้เคียง" ไปหมดจนคำแนะนำไม่มีความหมาย
+  if(p.terms.length && p.terms[0].length >= 4){
     const t = p.terms[0];
     const hit = {};
-    ROWS.forEach(function(r){ if(near(r.hay, t.slice(0, Math.max(3, t.length-1)))) hit[r.model] = 1; });
+    ROWS.forEach(function(r){ if(near(r.hay, t.slice(0, Math.max(4, t.length-1)))) hit[r.model] = 1; });
     Object.keys(hit).slice(0,6).forEach(function(m){guess.push(m)});
   }
   let hint = 'ลองพิมพ์เฉพาะชื่อรุ่นสั้น ๆ เช่น <b>vigo</b>, <b>altis</b>, <b>d-max</b> หรือใส่รหัสแร็คอย่าง <b>RT01</b>';
@@ -783,15 +808,26 @@ quickRow.innerHTML = EXAMPLES.slice(0,6).map(function(t){
   return '<button class="chip" type="button" data-q="'+escapeHtml(t)+'">'+escapeHtml(t)+'</button>';
 }).join('');
 wireChips(quickRow);
-sendBtn.addEventListener('click', function(){ const v = input.value; input.value = ''; autosize(); ask(v); });
+// ระหว่าง busy (กำลังพิมพ์...) ต้องไม่เคลียร์กล่องพิมพ์ ไม่งั้นข้อความที่พิมพ์ระหว่างรอ
+// คำตอบก่อนหน้าจะหาย เพราะ ask() คืนค่าทันทีเมื่อ busy=true แต่ input ถูกเคลียร์ไปแล้ว
+function submitInput(){
+  if(busy) return;
+  const v = input.value; input.value = ''; autosize(); ask(v);
+}
+sendBtn.addEventListener('click', submitInput);
 input.addEventListener('keydown', function(e){
   if(e.key === 'Enter' && !e.shiftKey){
     e.preventDefault();
-    const v = input.value; input.value = ''; autosize(); ask(v);
-  } else if(e.key === 'ArrowUp' && input.value === '' && qHistory.length){
+    submitInput();
+  } else if(e.key === 'ArrowUp' && qHistory.length && input.value.indexOf('\n') < 0){
+    // เช็คแค่ไม่มีขึ้นบรรทัดใหม่ (ไม่ใช่ value === '' เหมือนเดิม) เพื่อให้กด ArrowUp
+    // ย้อนประวัติได้ต่อเนื่องหลายครั้ง แม้กล่องพิมพ์จะมีข้อความจากการย้อนรอบก่อนอยู่แล้ว
+    // ส่วนกรณีพิมพ์หลายบรรทัดด้วย shift+enter ปล่อยให้ ArrowUp เลื่อน cursor ตามปกติ
+    e.preventDefault();
     histPos = Math.min(histPos+1, qHistory.length-1);
     input.value = qHistory[histPos]; autosize();
-  } else if(e.key === 'ArrowDown' && histPos > -1){
+  } else if(e.key === 'ArrowDown' && histPos > -1 && input.value.indexOf('\n') < 0){
+    e.preventDefault();
     histPos--; input.value = histPos < 0 ? '' : qHistory[histPos]; autosize();
   }
 });
